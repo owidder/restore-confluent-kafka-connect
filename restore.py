@@ -13,8 +13,9 @@ RESTORE_TOPIC_PREFIX = os.environ.get('RESTORE_TOPIC_PREFIX') or 'copy_of_'
 
 
 def send_to_kafka(producer: KafkaProducer, topic: str, value: bytes, headers: list, key: bytes, partition: int):
-    print(f"Send: topic={topic}, value={value}, headers={headers}, key={key}, partition={partition}")
-    producer.send(topic=topic, value=value, headers=headers, key=key, partition=partition)
+    headers_tuple = [(h['key'], bytes(h['value'], 'utf8')) for h in headers]
+    print(f"Send: topic={topic}, value={value}, headers={headers_tuple}, key={key}, partition={partition}")
+    producer.send(topic=topic, value=value, headers=headers_tuple, key=key, partition=partition)
     producer.flush()
 
 
