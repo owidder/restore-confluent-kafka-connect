@@ -1,6 +1,20 @@
 import os
+import sys
 from avro.io import DatumReader
 from avro.datafile import DataFileReader
+from kafka import KafkaProducer
+from getpass import getpass
+
+
+KAFKA_BROKERS = os.environ.get('KAFKA_BROKERS')
+CERT_LOCATION = os.environ.get('CERT_LOCATION')
+KEY_LOCATION = os.environ.get('KEY_LOCATION')
+RESTORE_TOPIC_PREFIX = os.environ.get('RESTORE_TOPIC_PREFIX') or 'copy_of_'
+
+
+def send_to_kafka(producer: KafkaProducer, topic: str, value: bytes, headers: list, key: bytes, partition: int):
+    producer.send(topic=topic, value=value, headers=headers, key=key, partition=partition)
+    producer.flush()
 
 
 def get_topic_name_partition_offset(file_name: str) -> tuple:
@@ -42,12 +56,7 @@ def read_value(file_path: str) -> bytes:
     return value
 
 
-def send_message(topic_name: str, partition: int, offset: int, value: bytes, headers: list, key: bytes):
-    if len(topic_name) > 0:
-        print(f"send to {topic_name}/{partition}/{offset}: {value}, {headers}, {key}")
-
-
-def read_and_process_files(rootpath: str):
+def read_and_process_files(rootpath: str, producer: KafkaProducer):
     current_topic_name = ""
     current_partition = -1
     current_offset = -1
@@ -60,7 +69,12 @@ def read_and_process_files(rootpath: str):
             file_path = os.path.join(root, name)
             topic_name, partition, offset = get_topic_name_partition_offset(name)
             if topic_name != current_topic_name or partition != current_partition or offset != current_offset:
-                send_message(topic_name=current_topic_name, partition=current_partition, offset=current_offset, value=current_value, headers=current_headers, key=current_key)
+                send_to_kafka(producer=producer,
+                              topic=f"{RESTORE_TOPIC_PREFIX}{current_topic_name}",
+                              value=current_value,
+                              headers=current_headers,
+                              key=current_key,
+                              partition=current_partition)
                 current_topic_name, current_partition, current_offset = topic_name, partition, offset
                 current_value, current_headers, current_key = b'', [], b''
 
@@ -75,4 +89,11 @@ def read_and_process_files(rootpath: str):
 
 
 if __name__ == "__main__":
-    read_and_process_files("./s3")
+    password = getpass()
+    producer = KafkaProducer(bootstrap_servers=KAFKA_BROKERS,
+                             security_protocol='SSL',
+                             ssl_check_hostname=True,
+                             ssl_certfile=CERT_LOCATION,
+                             ssl_keyfile=KEY_LOCATION,
+                             ssl_password=password)
+    read_and_process_files(rootpath=sys.argv[1], producer=producer)
