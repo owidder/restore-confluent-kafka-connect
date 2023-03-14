@@ -1,5 +1,7 @@
+import base64
 import os
 import sys
+import json
 from avro.io import DatumReader
 from avro.datafile import DataFileReader
 from kafka import KafkaProducer
@@ -12,10 +14,10 @@ KEY_LOCATION = os.environ.get('KEY_LOCATION')
 RESTORE_TOPIC_PREFIX = os.environ.get('RESTORE_TOPIC_PREFIX') or 'copy_of_'
 
 
-def send_to_kafka(producer: KafkaProducer, topic: str, value: bytes, headers: list, key: bytes, partition: int):
-    headers_tuple = [(h['key'], bytes(h['value'], 'utf8')) for h in headers]
-    print(f"Send: topic={topic}, value={value}, headers={headers_tuple}, key={key}, partition={partition}")
-    producer.send(topic=topic, value=value, headers=headers_tuple, key=key, partition=partition)
+def send_to_kafka(producer: KafkaProducer, topic: str, lines: list, headers: list, keys: list, partition: int):
+    for line, header_list, key in zip(lines, headers, keys):
+        #print(f"producer.send(topic={topic}, value={line}, headers={header_list}, key={key}, partition={partition})")
+        producer.send(topic=topic, value=line, headers=header_list, key=key, partition=partition)
     producer.flush()
 
 
@@ -32,30 +34,32 @@ def read_headers(file_path: str) -> list:
     headers = []
     with open(file_path, 'rb') as f:
         headers_reader = DataFileReader(f, DatumReader())
-        for h in headers_reader:
-            headers = headers + h
+        for header_list in headers_reader:
+            headers.append(header_list)
 
         headers_reader.close()
 
-        return headers
+        return [[(h['key'], bytes(h['value'], 'utf8')) for h in header_list] for header_list in headers]
 
 
-def read_key(file_path: str) -> bytes:
-    key = b''
+def read_keys(file_path: str) -> list:
+    keys = []
     with open(file_path, 'rb') as f:
         key_reader = DataFileReader(f, DatumReader())
-        for k in key_reader:
-            key = key + bytes(k, 'utf8')
+        for key in key_reader:
+            keys.append(key)
 
         key_reader.close()
 
-        return key
+        return [bytes(k, 'utf8') for k in keys]
 
 
-def read_value(file_path: str) -> bytes:
+def read_lines(file_path: str) -> list:
     with open(file_path, 'rb') as f:
-        value = f.read()
-    return value
+        raw_lines = f.readlines()
+
+    lines = [base64.b64decode(json.loads(raw_line)) for raw_line in raw_lines]
+    return lines
 
 
 def read_and_process_files(rootpath: str, producer: KafkaProducer):
@@ -63,7 +67,7 @@ def read_and_process_files(rootpath: str, producer: KafkaProducer):
     current_partition = -1
     current_offset = -1
 
-    current_value, current_headers, current_key = b'', [], b''
+    current_lines, current_headers, current_keys = [], [], []
 
     for root, dirs, files in os.walk(rootpath, topdown=False):
         files.sort()
@@ -74,21 +78,21 @@ def read_and_process_files(rootpath: str, producer: KafkaProducer):
                 if len(current_topic_name) > 0:
                     send_to_kafka(producer=producer,
                                   topic=f"{RESTORE_TOPIC_PREFIX}{current_topic_name}",
-                                  value=current_value,
+                                  lines=current_lines,
                                   headers=current_headers,
-                                  key=current_key,
+                                  keys=current_keys,
                                   partition=current_partition)
                 current_topic_name, current_partition, current_offset = topic_name, partition, offset
-                current_value, current_headers, current_key = b'', [], b''
+                current_lines, current_headers, current_keys = [], [], []
 
-            if name.endswith('.bin'):
-                current_value = read_value(file_path)
+            if name.endswith('.json'):
+                current_lines = read_lines(file_path)
 
             if name.endswith('.headers.avro'):
                 current_headers = read_headers(file_path)
 
             if name.endswith('.keys.avro'):
-                current_key = read_key(file_path)
+                current_keys = read_keys(file_path)
 
 
 if __name__ == "__main__":
@@ -103,3 +107,4 @@ if __name__ == "__main__":
                              ssl_keyfile=KEY_LOCATION,
                              ssl_password=password)
     read_and_process_files(rootpath=sys.argv[1], producer=producer)
+    #read_and_process_files(rootpath=sys.argv[1], producer=None)
