@@ -2,3 +2,5 @@ s3/
 .idea/
 producer.py
 read_avro.py
+s3.tgz
+s3-test/

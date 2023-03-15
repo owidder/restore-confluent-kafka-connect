@@ -13,12 +13,16 @@ CERT_LOCATION = os.environ.get('CERT_LOCATION')
 KEY_LOCATION = os.environ.get('KEY_LOCATION')
 RESTORE_TOPIC_PREFIX = os.environ.get('RESTORE_TOPIC_PREFIX') or 'copy_of_'
 
+counter = 0
 
 def send_to_kafka(producer: KafkaProducer, topic: str, lines: list, headers: list, keys: list, partition: int):
+    global counter
     for line, header_list, key in zip(lines, headers, keys):
         #print(f"producer.send(topic={topic}, value={line}, headers={header_list}, key={key}, partition={partition})")
+        counter = counter + 1
         producer.send(topic=topic, value=line, headers=header_list, key=key, partition=partition)
     producer.flush()
+    print(f"Messages processed: {counter}")
 
 
 def get_topic_name_partition_offset(file_name: str) -> tuple:
@@ -94,6 +98,14 @@ def read_and_process_files(rootpath: str, producer: KafkaProducer):
             if name.endswith('.keys.avro'):
                 current_keys = read_keys(file_path)
 
+    if len(current_lines) > 0:
+        send_to_kafka(producer=producer,
+                      topic=f"{RESTORE_TOPIC_PREFIX}{current_topic_name}",
+                      lines=current_lines,
+                      headers=current_headers,
+                      keys=current_keys,
+                      partition=current_partition)
+
 
 if __name__ == "__main__":
     print(KAFKA_BROKERS)
@@ -107,4 +119,5 @@ if __name__ == "__main__":
                              ssl_keyfile=KEY_LOCATION,
                              ssl_password=password)
     read_and_process_files(rootpath=sys.argv[1], producer=producer)
-    #read_and_process_files(rootpath=sys.argv[1], producer=None)
+
+    print (f"Total messages processed: {counter}")
