@@ -73,7 +73,8 @@ def read_and_process_files(rootpath: str, producer: KafkaProducer):
 
     current_lines, current_headers, current_keys = [], [], []
 
-    for root, dirs, files in os.walk(rootpath, topdown=False):
+    for root, dirs, files in os.walk(rootpath, topdown=True):
+        dirs.sort()
         files.sort()
         for name in files:
             file_path = os.path.join(root, name)
@@ -86,8 +87,9 @@ def read_and_process_files(rootpath: str, producer: KafkaProducer):
                                   headers=current_headers,
                                   keys=current_keys,
                                   partition=current_partition)
-                current_topic_name, current_partition, current_offset = topic_name, partition, offset
                 current_lines, current_headers, current_keys = [], [], []
+
+            current_topic_name, current_partition, current_offset = topic_name, partition, offset
 
             if name.endswith('.json'):
                 current_lines = read_lines(file_path)
